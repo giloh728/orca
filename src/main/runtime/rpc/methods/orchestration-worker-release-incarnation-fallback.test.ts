@@ -306,8 +306,8 @@ describe('orchestration worker release incarnation fallback', () => {
   })
 
   it('reaches settleDead before the lease check when a gone worker is exited with no live authority', async () => {
-    // Without a committed archive settleDead retains; lease must not run first and force
-    // retained/identity_unproven. Disposition is release_unknown (interactive) after the retain.
+    // A host-certified gone process settles through settleDead with an unavailable archive; the
+    // lease check must not run first and turn this matching release into retained.
     setup()
     const { dispatchId } = await startSettledWorker()
     vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))

@@ -19,6 +19,7 @@ import { workerTerminalLeaseIsCurrent } from './worker-terminal-release-lease'
 import { resolveStructuredWorkerForDispatch } from '../../orchestration-structured-worker-lifecycle'
 import { stopStructuredWorkerForRelease } from './structured-worker-release-stop'
 import { isStructuredWorkerHandle } from '../../../../structured-worker-identity'
+import { releaseProvenDeadMissingWorkerTerminal } from './worker-release-missing-terminal'
 
 export {
   archiveSummary,
@@ -134,35 +135,14 @@ async function completeWorkerTerminalReleaseOnce(
     }
   }
   if (observation.status === 'missing' || observation.status === 'unattached') {
-    // Re-resolution by process incarnation (inspectWorkerTerminal) already failed, so no live PTY
-    // carries this worker's exact incarnation. If that incarnation is provably gone, settle
-    // released BEFORE the recovery defer: proof of death outranks deferral, so a provably-exited
-    // worker never languishes in release_pending across recovery passes.
-    if (resource.process_incarnation) {
-      const processLiveness = await runtime.inspectTerminalProcessIncarnationLiveness(
-        resource.process_incarnation,
-        resource.host_scope
-      )
-      if (processLiveness === 'exited') {
-        // Prefer incarnation-fenced settle (dispatch relation + process_incarnation CAS).
-        const reconciled = db.settleDeadWorkerTerminalRelease({
-          requestingDispatchId: dispatchId,
-          resourceId: resource.id,
-          processIncarnation: resource.process_incarnation
-        })
-        if (reconciled.disposition === 'released') {
-          runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
-          return {
-            dispatchId,
-            state: 'released',
-            processAction: 'none',
-            archive: archiveSummary(reconciled.resource)
-          }
-        }
-        // settleDead retains when the archive is still mandatory and missing (e.g. requested but
-        // never committed). Do NOT plain-settle: that would discard output and break recovery's
-        // "archive is mandatory" invariant. Fall through to recovery pending / unknown instead.
-      }
+    const deadRelease = await releaseProvenDeadMissingWorkerTerminal({
+      runtime,
+      db,
+      dispatchId,
+      resource
+    })
+    if (deadRelease) {
+      return deadRelease
     }
     if (args.mode === 'recovery') {
       // No death certificate yet: inventory may still be incomplete during startup/reconnect

@@ -240,7 +240,7 @@ describe('orchestration worker release incarnation fallback', () => {
     expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('unknown')
   })
 
-  it('does not plain-settle an exited missing worker when the archive was never committed', async () => {
+  it('records unavailable output when the original missing process is proven dead', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
     vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
@@ -257,12 +257,13 @@ describe('orchestration worker release incarnation fallback', () => {
       processAction: string
     }
 
-    expect(receipt).toMatchObject({ state: 'release_unknown', processAction: 'none' })
+    expect(receipt).toMatchObject({ state: 'released', processAction: 'none' })
     expect(inspectProcessLiveness).toHaveBeenCalled()
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
     expect(db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
-      ownership_state: 'owned',
-      release_state: 'unknown'
+      ownership_state: 'released',
+      release_state: 'released',
+      archive_status: 'unavailable'
     })
   })
 
@@ -326,7 +327,7 @@ describe('orchestration worker release incarnation fallback', () => {
       processAction: string
     }
 
-    expect(receipt).toMatchObject({ state: 'release_unknown', processAction: 'none' })
+    expect(receipt).toMatchObject({ state: 'released', processAction: 'none' })
     expect(receipt.state).not.toBe('retained')
     expect(inspectProcessLiveness).toHaveBeenCalled()
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
@@ -426,9 +427,7 @@ describe('orchestration worker release incarnation fallback', () => {
 
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
   // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test fixture crosses a private/runtime boundary with a verified shape.
-  it('recovery-mode: defers when exited missing has no archive rather than plain-settling', async () => {
-    // Proof of death still runs settleDead first; when it retains (no archive), recovery must
-    // stay release_pending — not plain-settle, not unknown.
+  it('recovery-mode: settles proven-dead missing output as unavailable', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
     vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
@@ -450,11 +449,12 @@ describe('orchestration worker release incarnation fallback', () => {
       mode: 'recovery'
     })
 
-    expect(receipt).toMatchObject({ state: 'release_pending', processAction: 'none' })
+    expect(receipt).toMatchObject({ state: 'released', processAction: 'none' })
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
     expect(db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
-      ownership_state: 'owned',
-      release_state: 'requested'
+      ownership_state: 'released',
+      release_state: 'released',
+      archive_status: 'unavailable'
     })
   })
 

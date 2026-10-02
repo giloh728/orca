@@ -2,8 +2,7 @@ import type { OrchestrationDb } from '../../../../orchestration/db'
 import type {
   WorkerTerminalArchiveKind,
   WorkerTerminalArchiveStatus,
-  WorkerTerminalResourceRow,
-  WorkerTerminalRetainedReason
+  WorkerTerminalResourceRow
 } from '../../../../orchestration/worker-terminal-ownership'
 import {
   captureWorkerOutputArchive,
@@ -20,21 +19,19 @@ import { resolveStructuredWorkerForDispatch } from '../../orchestration-structur
 import { stopStructuredWorkerForRelease } from './structured-worker-release-stop'
 import { isStructuredWorkerHandle } from '../../../../structured-worker-identity'
 import { releaseProvenDeadMissingWorkerTerminal } from './worker-release-missing-terminal'
+import {
+  releasePendingRecovery,
+  releaseUnknownRecovery,
+  retainedReason,
+  type WorkerReleaseReceipt
+} from './worker-release-receipt'
 
 export {
   archiveSummary,
   exposeWorkerTerminalResource
 } from './worker-terminal-resource-presentation'
-
-export type WorkerReleaseReceipt = {
-  dispatchId: string
-  state: 'released' | 'already_released' | 'retained' | 'release_pending' | 'release_unknown'
-  reason?: WorkerTerminalRetainedReason
-  processAction: 'closed_agent_terminal' | 'closed_exited_terminal' | 'none'
-  archive: { source: string | null; status: string | null } | null
-  recovery?: string
-  lastError?: string
-}
+export { releaseUnknownRecovery } from './worker-release-receipt'
+export type { WorkerReleaseReceipt } from './worker-release-receipt'
 
 type WorkerTerminalReleaseArgs = {
   runtime: OrcaRuntimeService
@@ -152,8 +149,7 @@ async function completeWorkerTerminalReleaseOnce(
         state: 'release_pending',
         processAction: 'none',
         archive: archiveSummary(resource),
-        recovery:
-          'The recorded terminal has not been rediscovered yet; recovery will retry after the next terminal inventory.'
+        recovery: releasePendingRecovery()
       }
     }
     // Why: the handle resolves nowhere, but the PTY could have been re-homed after a restart —
@@ -293,18 +289,4 @@ async function completeWorkerTerminalReleaseOnce(
       observation.status === 'exited' ? 'closed_exited_terminal' : 'closed_agent_terminal',
     archive: archiveSummary(released)
   }
-}
-
-export function releaseUnknownRecovery(dispatchId: string): string {
-  return `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then retry worker-release with a fresh request ID (omit --retry-request to let the CLI generate one). Reusing the prior request ID only replays this release_unknown receipt. Never substitute a broad terminal close.`
-}
-
-function retainedReason(resource: WorkerTerminalResourceRow): WorkerTerminalRetainedReason {
-  if (resource.retained_reason) {
-    return resource.retained_reason as WorkerTerminalRetainedReason
-  }
-  if (resource.ownership_state === 'user_owned') {
-    return 'user_takeover'
-  }
-  return 'identity_unproven'
 }

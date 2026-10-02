@@ -132,8 +132,59 @@ describe('release of the original missing process without an archive', () => {
       })
       expect(
         await harness.call('orchestration.workerRelease', { dispatch: dispatchId })
-      ).toMatchObject({ state: 'retained' })
+      ).toMatchObject({
+        state: 'release_pending',
+        recovery: expect.stringContaining('recovery will retry')
+      })
       expect(harness.db.getWorkerTerminalResource(resource.id)?.release_completed_at).toBeNull()
     }
   )
+
+  it.each(['process_incarnation', 'host_scope', 'terminal_handle'] as const)(
+    'reports unknown when %s changes and the current release is already unknown',
+    async (column) => {
+      const { dispatchId } = await startMissingWorker()
+      const resource = harness.db.getWorkerTerminalResourceByOwner(dispatchId)!
+      harness.inspectProcessLiveness.mockImplementation(async () => {
+        harness.db.db
+          .prepare(
+            `UPDATE worker_terminal_resources
+             SET ${column} = ?, release_state = 'unknown', release_error = ?
+             WHERE id = ?`
+          )
+          .run('replacement', 'close outcome was not proven', resource.id)
+        return 'exited'
+      })
+      expect(
+        await harness.call('orchestration.workerRelease', { dispatch: dispatchId })
+      ).toMatchObject({
+        state: 'release_unknown',
+        lastError: 'close outcome was not proven',
+        recovery: expect.stringContaining('fresh request ID')
+      })
+      expect(harness.db.getWorkerTerminalResource(resource.id)).toMatchObject({
+        release_state: 'unknown',
+        release_completed_at: null
+      })
+    }
+  )
+
+  it('preserves an already released row when the death probe races with settlement', async () => {
+    const { dispatchId } = await startMissingWorker()
+    const resource = harness.db.getWorkerTerminalResourceByOwner(dispatchId)!
+    harness.inspectProcessLiveness.mockImplementation(async () => {
+      harness.db.db
+        .prepare(
+          `UPDATE worker_terminal_resources
+           SET ownership_state = 'released', release_state = 'released',
+               release_completed_at = datetime('now')
+           WHERE id = ?`
+        )
+        .run(resource.id)
+      return 'exited'
+    })
+    expect(
+      await harness.call('orchestration.workerRelease', { dispatch: dispatchId })
+    ).toMatchObject({ state: 'already_released' })
+  })
 })

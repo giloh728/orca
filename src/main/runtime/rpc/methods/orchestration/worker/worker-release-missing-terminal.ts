@@ -1,10 +1,10 @@
 import type { OrchestrationDb } from '../../../../orchestration/db'
-import {
-  decideWorkerTerminalRelease,
-  type WorkerTerminalResourceRow
-} from '../../../../orchestration/worker-terminal-ownership'
+import type { WorkerTerminalResourceRow } from '../../../../orchestration/worker-terminal-ownership'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
-import type { WorkerReleaseReceipt } from './worker-release-completion'
+import {
+  workerReleaseReceiptFromResource,
+  type WorkerReleaseReceipt
+} from './worker-release-receipt'
 import { inspectWorkerTerminal } from './worker-observation'
 import { archiveSummary } from './worker-terminal-resource-presentation'
 
@@ -46,17 +46,5 @@ export async function releaseProvenDeadMissingWorkerTerminal(args: {
       archive: archiveSummary(reconciled.resource)
     }
   }
-  const decision = decideWorkerTerminalRelease(reconciled.resource)
-  return {
-    dispatchId,
-    state: decision.action === 'already_released' ? 'already_released' : 'retained',
-    reason:
-      decision.action === 'retained'
-        ? decision.reason
-        : reconciled.resource.retained_reason === 'user_requested'
-          ? 'user_requested'
-          : 'identity_unproven',
-    processAction: 'none',
-    archive: archiveSummary(reconciled.resource)
-  }
+  return workerReleaseReceiptFromResource(dispatchId, reconciled.resource)
 }
